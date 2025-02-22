@@ -42,7 +42,7 @@ headers: {
 },
 });
 
-return response.data
+return response.data.files[0]
 } catch (error) {
 throw error;
 }
