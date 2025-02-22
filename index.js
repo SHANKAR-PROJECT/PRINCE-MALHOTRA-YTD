@@ -32,10 +32,10 @@ function formatNumber(num) {
 return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-async function catbox(media) {
+async function catbox(media, filename) {
 try {
 const form = new FormData();
-form.append("files[]", media)
+form.append("files[]", media, filename)
 const response = await axios.post("https://uguu.se/upload.php", form, {
 headers: {
 ...form.getHeaders(),
