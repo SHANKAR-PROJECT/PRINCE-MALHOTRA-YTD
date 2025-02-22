@@ -32,19 +32,17 @@ function formatNumber(num) {
 return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-async function catbox(media, filename) {
+async function catbox(media) {
 try {
 const form = new FormData();
-form.append("reqtype", "fileupload");
-form.append("fileToUpload", media, filename);
-
-const response = await axios.post("https://catbox.moe/user/api.php", form, {
+form.append("files[]", media)
+const response = await axios.post("https://uguu.se/upload.php", form, {
 headers: {
 ...form.getHeaders(),
 },
 });
 
-return response.data;
+return response.data.data.files[0]
 } catch (error) {
 throw error;
 }
