@@ -88,6 +88,7 @@ url: videoUrl,
 },
 });
 } catch (error) {
+  console.log(error)
 res.status(500).json({ error: "Gagal memproses video", details: error.message });
 }
 });
@@ -117,6 +118,7 @@ url: audioUrl,
 },
 });
 } catch (error) {
+  console.log(error)
 res.status(500).json({ error: "Gagal memproses audio", details: error.message });
 }
 });
