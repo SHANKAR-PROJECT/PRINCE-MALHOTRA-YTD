@@ -64,7 +64,7 @@ app.get("/video", async (req, res) => {
                 result: {
                     quality: videoFormat.qualityLabel || "Tidak diketahui",
                     size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Ukuran tidak tersedia",
-                    url: `/files/${filename}`, // Akses langsung ke file
+                    url: `${req.protocol}/files/${filename}`, // Akses langsung ke file
                 },
             });
         });
@@ -98,7 +98,7 @@ app.get("/audio", async (req, res) => {
                 result: {
                     quality: `${audioFormat.audioBitrate} kbps`,
                     size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Ukuran tidak tersedia",
-                    url: `/files/${filename}`, // Akses langsung ke file
+                    url: `${req.protocol}/files/${filename}`, // Akses langsung ke file
                 },
             });
         });
