@@ -66,7 +66,7 @@ const videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", qualit
 const info = await getVideoInfo(url);
 const videoStream = ytdl(url, { format: videoFormat, agent });
 const filename = `video-${Date.now()}.mp4`
-const writeStream = fs.createWriteStream('/tmp' + filename);
+const writeStream = fs.createWriteStream('/tmp/' + filename);
 videoStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
@@ -99,7 +99,7 @@ const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
 const info = await getVideoInfo(url);
 const audioStream = ytdl(url, { format: audioFormat, agent });
 const filename = `audio-${Date.now()}.mp3`
-const writeStream = fs.createWriteStream('/tmp' + filename);
+const writeStream = fs.createWriteStream('/tmp/' + filename);
 audioStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
