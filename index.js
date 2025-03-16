@@ -9,6 +9,9 @@ const app = express();
 const PORT = 7860;
 
 const tempDir = path.join(__dirname, 'public');
+if (!fs.existsSync(tempDir)) {
+fs.mkdirSync(tempDir);
+}
 
 app.use(cors());
 
