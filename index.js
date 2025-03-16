@@ -74,7 +74,7 @@ info,
 result: {
 quality: videoFormat.qualityLabel || "Tidak diketahui",
 size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Ukuran tidak tersedia",
-url: videoUrl,
+url: `${req.protocol}://${req.get('host')}/files/${filename}`,
 },
 });
 });
