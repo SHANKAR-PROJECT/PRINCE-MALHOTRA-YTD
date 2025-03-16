@@ -12,6 +12,7 @@ app.use(cors());
 
 app.use("/files", express.static('/tmp'));
 
+
 const agent = ytdl.createAgent(require("./cookie.json"));
 
 function formatBytes(bytes) {
@@ -64,8 +65,8 @@ formats = Object.values(formats);
 const videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", quality: "highest" });
 const info = await getVideoInfo(url);
 const videoStream = ytdl(url, { format: videoFormat, agent });
-const filename = `/tmp/video-${Date.now()}.mp4`
-const writeStream = fs.createWriteStream(filename);
+const filename = `video-${Date.now()}.mp4`
+const writeStream = fs.createWriteStream('/tmp' + filename);
 videoStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
@@ -73,7 +74,7 @@ info,
 result: {
 quality: videoFormat.qualityLabel || "Tidak diketahui",
 size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Ukuran tidak tersedia",
-url: `${req.protocol}://${req.get('host')}/files/${filename}`,
+url: videoUrl,
 },
 });
 });
@@ -97,8 +98,8 @@ formats = Object.values(formats);
 const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
 const info = await getVideoInfo(url);
 const audioStream = ytdl(url, { format: audioFormat, agent });
-const filename = `/tmp/audio-${Date.now()}.mp3`
-const writeStream = fs.createWriteStream(filename);
+const filename = `audio-${Date.now()}.mp3`
+const writeStream = fs.createWriteStream('/tmp' + filename);
 audioStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
@@ -111,7 +112,7 @@ url: `${req.protocol}://${req.get('host')}/files/${filename}`,
 });
 });
 } catch (error) {
-  console.log(error)
+console.log(error)
 res.status(500).json({ error: "Gagal memproses audio", details: error.message });
 }
 });
