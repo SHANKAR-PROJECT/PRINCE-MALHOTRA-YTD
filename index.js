@@ -2,16 +2,17 @@ const express = require("express");
 const ytSearch = require("yt-search");
 const ytdl = require("@distube/ytdl-core");
 const axios = require("axios");
-const FormData = require("form-data");
+const parh = require("path");
 const cors = require("cors");
 const fs = require("fs")
 const app = express();
 const PORT = 7860;
 
+const tempDir = path.join(__dirname, 'public');
+
 app.use(cors());
 
-app.use("/files", express.static('/tmp'));
-
+app.use("/files", express.static(tempDir));
 
 const agent = ytdl.createAgent(require("./cookie.json"));
 
@@ -66,7 +67,7 @@ const videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", qualit
 const info = await getVideoInfo(url);
 const videoStream = ytdl(url, { format: videoFormat, agent });
 const filename = `video-${Date.now()}.mp4`
-const writeStream = fs.createWriteStream('/tmp/' + filename);
+const writeStream = fs.createWriteStream(tempDir + '/' + filename);
 videoStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
@@ -99,7 +100,7 @@ const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
 const info = await getVideoInfo(url);
 const audioStream = ytdl(url, { format: audioFormat, agent });
 const filename = `audio-${Date.now()}.mp3`
-const writeStream = fs.createWriteStream('/tmp/' + filename);
+const writeStream = fs.createWriteStream(tempDir + '/' + filename);
 audioStream.pipe(writeStream);
 writeStream.on("finish", async () => {
 res.json({
