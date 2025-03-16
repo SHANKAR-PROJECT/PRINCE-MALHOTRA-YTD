@@ -10,6 +10,8 @@ const PORT = 7860;
 
 app.use(cors());
 
+app.use("/files", express.static('/tmp'));
+
 const agent = ytdl.createAgent(require("./cookie.json"));
 
 function formatBytes(bytes) {
