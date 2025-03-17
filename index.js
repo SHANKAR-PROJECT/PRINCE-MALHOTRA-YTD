@@ -2,132 +2,151 @@ const express = require("express");
 const ytSearch = require("yt-search");
 const ytdl = require("@distube/ytdl-core");
 const axios = require("axios");
+const path = require("path");
 const cors = require("cors");
-
+const fs = require("fs")
 const app = express();
 const PORT = 7860;
 
+const tempDir = '/tmp/public'//path.join(__dirname, 'public');
+if (!fs.existsSync(tempDir)) {
+fs.mkdirSync(tempDir);
+}
+
 app.use(cors());
 
-// YouTube Cookies
+app.use("/files", express.static(tempDir));
+
 const agent = ytdl.createAgent(require("./cookie.json"));
 
 function formatBytes(bytes) {
-    if (bytes === 0) return "0 Bytes";
-    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
+if (bytes === 0) return "0 Bytes";
+const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+const i = Math.floor(Math.log(bytes) / Math.log(1024));
+return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
 }
+
+function formatDate(dateString) {
+const months = [
+"Januari", "Februari", "Maret", "April", "Mei", "Juni",
+"Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
+const date = new Date(dateString);
+return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatNumber(num) {
+return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 
 async function getVideoInfo(url) {
-    const info = await ytdl.getInfo(url, { agent });
-    const details = info.videoDetails;
-    return {
-        title: details.title,
-        description: details.description || "No description",
-        thumbnail: details.thumbnails.pop().url,
-        duration: `${Math.floor(details.lengthSeconds / 60)}:${details.lengthSeconds % 60} minutes`,
-        uploader: details.author.name,
-        views: details.viewCount.toLocaleString(),
-        uploadDate: details.uploadDate
-    };
+const info = await ytdl.getInfo(url, { agent });
+const details = info.videoDetails;
+return {
+title: details.title,
+description: details.description || "Tidak ada deskripsi",
+thumbnail: details.thumbnails.pop().url,
+duration: `${Math.floor(details.lengthSeconds / 60)}:${details.lengthSeconds % 60} menit`,
+uploader: details.author.name,
+uploadDate: formatDate(details.uploadDate),
+views: formatNumber(details.viewCount),
+likes: formatNumber(details.likes || 0),
+};
 }
 
-async function downloadToBuffer(url, format) {
-    const chunks = [];
-    const stream = ytdl(url, { format, agent });
-
-    return new Promise((resolve, reject) => {
-        stream.on("data", chunk => chunks.push(chunk));
-        stream.on("end", () => resolve(Buffer.concat(chunks)));
-        stream.on("error", reject);
-    });
+app.get("/video", async (req, res) => {
+const { url } = req.query;
+if (!url || !ytdl.validateURL(url)) {
+return res.status(400).json({ error: "URL tidak valid" });
 }
-
-async function catbox(mediaBuffer, filename) {
-    try {
-        const form = new FormData();
-        form.append("reqtype", "fileupload");
-        form.append("fileToUpload", mediaBuffer, filename);
-
-        const response = await axios.post("https://catbox.moe/user/api.php", form, {
-            headers: { ...form.getHeaders() },
-        });
-
-        return response.data;
-    } catch (error) {
-        throw new Error("Failed to upload to Catbox");
-    }
+try {
+const infoFull = await ytdl.getInfo(url, { agent });
+let formats = infoFull.formats;
+if (!Array.isArray(formats)) {
+formats = Object.values(formats);
 }
+const videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", quality: "highest" });
+const info = await getVideoInfo(url);
+const videoStream = ytdl(url, { format: videoFormat, agent });
+const filename = `video-${Date.now()}.mp4`
+const writeStream = fs.createWriteStream(tempDir + '/' + filename);
+videoStream.pipe(writeStream);
+writeStream.on("finish", async () => {
+res.json({
+info,
+result: {
+quality: videoFormat.qualityLabel || "Tidak diketahui",
+size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Ukuran tidak tersedia",
+url: `${req.protocol}://${req.get('host')}/files/${filename}`,
+},
+});
+});
+} catch (error) {
+console.log(error)
+res.status(500).json({ error: "Gagal memproses video", details: error.message });
+}
+});
 
-// 🎵 **Audio Download API**
 app.get("/audio", async (req, res) => {
-    try {
-        const { url } = req.query;
-        if (!url || !ytdl.validateURL(url)) {
-            return res.status(400).json({ error: "Invalid URL" });
-        }
-
-        const infoFull = await ytdl.getInfo(url, { agent });
-        const formats = infoFull.formats.filter(f => f.hasAudio && !f.hasVideo);
-
-        if (!formats.length) {
-            return res.status(500).json({ error: "No suitable audio format found" });
-        }
-
-        const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
-
-        // **🚀 Fix: Alternative Audio Extraction**
-        let buffer;
-        try {
-            buffer = await downloadToBuffer(url, audioFormat);
-        } catch (err) {
-            console.log("🔴 Direct download failed, trying DASH stream...");
-            const dashFormat = ytdl.chooseFormat(infoFull.formats, { quality: "highestaudio" });
-            buffer = await downloadToBuffer(url, dashFormat);
-        }
-
-        const audioUrl = await catbox(buffer, "audio.mp3");
-
-        res.json({
-            info: await getVideoInfo(url),
-            result: {
-                quality: `${audioFormat.audioBitrate} kbps`,
-                size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Size not available",
-                url: audioUrl
-            },
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to process audio", details: error.message });
-    }
+const { url } = req.query;
+if (!url || !ytdl.validateURL(url)) {
+return res.status(400).json({ error: "URL tidak valid" });
+}
+try {
+const infoFull = await ytdl.getInfo(url, { agent });
+let formats = infoFull.formats;
+if (!Array.isArray(formats)) {
+formats = Object.values(formats);
+}
+const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
+const info = await getVideoInfo(url);
+const audioStream = ytdl(url, { format: audioFormat, agent });
+const filename = `audio-${Date.now()}.mp3`
+const writeStream = fs.createWriteStream(tempDir + '/' + filename);
+audioStream.pipe(writeStream);
+writeStream.on("finish", async () => {
+res.json({
+info,
+result: {
+quality: `${audioFormat.audioBitrate} kbps`,
+size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Ukuran tidak tersedia",
+url: `${req.protocol}://${req.get('host')}/files/${filename}`,
+},
+});
+});
+} catch (error) {
+console.log(error)
+res.status(500).json({ error: "Gagal memproses audio", details: error.message });
+}
 });
 
-// 🔍 **YouTube Search API**
 app.get("/search", async (req, res) => {
-    const query = req.query.q;
-    if (!query) {
-        return res.status(400).json({ error: "Query parameter 'q' is required" });
-    }
+const query = req.query.q;
 
-    try {
-        const result = await ytSearch(query);
-        const videos = result.videos.map(video => ({
-            title: video.title,
-            channel: video.author.name,
-            views: video.views.toLocaleString(),
-            duration: video.timestamp,
-            uploaded: video.ago,
-            url: video.url,
-            thumbnail: video.thumbnail
-        }));
+if (!query) {
+return res.status(400).json({ error: "Query parameter 'q' is required" });
+}
 
-        res.json({ query, results: videos });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to fetch search results", details: error.message });
-    }
+try {
+const result = await ytSearch(query);
+const videos = result.videos.map(video => ({
+title: video.title,
+channel: video.author.name,
+views: formatNumber(video.views),
+duration: video.timestamp,
+uploaded: video.ago,
+url: video.url,
+thumbnail: video.thumbnail
+}));
+
+res.json({ query, results: videos });
+} catch (error) {
+console.error("Error fetching YouTube search:", error);
+res.status(500).json({ error: "Failed to fetch search results", details: error.message });
+}
 });
 
-// 🚀 **Server Start**
 app.listen(PORT, () => {
-    console.log(`Server चल रहा है: http://localhost:${PORT}`);
+console.log(`Server berjalan di http://localhost:${PORT}`);
 });
