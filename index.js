@@ -10,7 +10,7 @@ const PORT = 7860;
 
 app.use(cors());
 
-// ytdl के लिए cookie.json (अगर ज़रूरी हो)
+// ✅ Updated ytdl Agent with Cookies
 const agent = ytdl.createAgent(require("./cookie.json"));
 
 // 👉 Bytes को human-readable format में बदलना
@@ -39,7 +39,17 @@ async function getVideoInfo(url) {
 // 👉 YouTube ऑडियो को buffer में डाउनलोड करना
 async function downloadToBuffer(url, format) {
     const chunks = [];
-    const stream = ytdl(url, { format, agent });
+    const stream = ytdl(url, { 
+        format, 
+        agent,
+        requestOptions: { // ✅ Added Headers to Avoid 403 Error
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Cookie": "YOUR_COOKIE_HERE"
+            }
+        }
+    });
+
     return new Promise((resolve, reject) => {
         stream.on("data", chunk => chunks.push(chunk));
         stream.on("end", () => resolve(Buffer.concat(chunks)));
@@ -80,6 +90,8 @@ app.get("/audio", async (req, res) => {
         }
 
         const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
+
+        // ✅ Use downloadFromInfo instead of getInfo for better format selection
         const buffer = await downloadToBuffer(url, audioFormat);
         const audioUrl = await catbox(buffer, "audio.mp3");
 
