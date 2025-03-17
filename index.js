@@ -2,7 +2,6 @@ const express = require("express");
 const ytSearch = require("yt-search");
 const ytdl = require("@distube/ytdl-core");
 const axios = require("axios");
-const FormData = require("form-data");
 const cors = require("cors");
 
 const app = express();
@@ -10,10 +9,9 @@ const PORT = 7860;
 
 app.use(cors());
 
-// ✅ Updated ytdl Agent with Cookies
+// YouTube Cookies
 const agent = ytdl.createAgent(require("./cookie.json"));
 
-// 👉 Bytes को human-readable format में बदलना
 function formatBytes(bytes) {
     if (bytes === 0) return "0 Bytes";
     const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
@@ -21,7 +19,6 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
 }
 
-// 👉 YouTube वीडियो की जानकारी निकालना
 async function getVideoInfo(url) {
     const info = await ytdl.getInfo(url, { agent });
     const details = info.videoDetails;
@@ -36,19 +33,9 @@ async function getVideoInfo(url) {
     };
 }
 
-// 👉 YouTube ऑडियो को buffer में डाउनलोड करना
 async function downloadToBuffer(url, format) {
     const chunks = [];
-    const stream = ytdl(url, { 
-        format, 
-        agent,
-        requestOptions: { // ✅ Added Headers to Avoid 403 Error
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Cookie": "YOUR_COOKIE_HERE"
-            }
-        }
-    });
+    const stream = ytdl(url, { format, agent });
 
     return new Promise((resolve, reject) => {
         stream.on("data", chunk => chunks.push(chunk));
@@ -57,7 +44,6 @@ async function downloadToBuffer(url, format) {
     });
 }
 
-// 👉 Catbox पर ऑडियो अपलोड करना
 async function catbox(mediaBuffer, filename) {
     try {
         const form = new FormData();
@@ -91,8 +77,16 @@ app.get("/audio", async (req, res) => {
 
         const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
 
-        // ✅ Use downloadFromInfo instead of getInfo for better format selection
-        const buffer = await downloadToBuffer(url, audioFormat);
+        // **🚀 Fix: Alternative Audio Extraction**
+        let buffer;
+        try {
+            buffer = await downloadToBuffer(url, audioFormat);
+        } catch (err) {
+            console.log("🔴 Direct download failed, trying DASH stream...");
+            const dashFormat = ytdl.chooseFormat(infoFull.formats, { quality: "highestaudio" });
+            buffer = await downloadToBuffer(url, dashFormat);
+        }
+
         const audioUrl = await catbox(buffer, "audio.mp3");
 
         res.json({
