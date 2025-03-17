@@ -1,20 +1,19 @@
 const express = require("express");
+const ytSearch = require("yt-search");
 const ytdl = require("@distube/ytdl-core");
-const fs = require("fs");
-const path = require("path");
+const axios = require("axios");
+const FormData = require("form-data");
 const cors = require("cors");
 
 const app = express();
 const PORT = 7860;
 
-const downloadDir = path.join(__dirname, "public");
-if (!fs.existsSync(downloadDir)) {
-    fs.mkdirSync(downloadDir, { recursive: true });
-}
-
 app.use(cors());
-app.use("/files", express.static(downloadDir));
 
+// ytdl के लिए cookie.json (अगर ज़रूरी हो)
+const agent = ytdl.createAgent(require("./cookie.json"));
+
+// 👉 Bytes को human-readable format में बदलना
 function formatBytes(bytes) {
     if (bytes === 0) return "0 Bytes";
     const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
@@ -22,87 +21,107 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
 }
 
+// 👉 YouTube वीडियो की जानकारी निकालना
 async function getVideoInfo(url) {
-    const info = await ytdl.getInfo(url);
+    const info = await ytdl.getInfo(url, { agent });
     const details = info.videoDetails;
     return {
         title: details.title,
+        description: details.description || "No description",
         thumbnail: details.thumbnails.pop().url,
-        duration: `${Math.floor(details.lengthSeconds / 60)}:${details.lengthSeconds % 60} मिनट`,
+        duration: `${Math.floor(details.lengthSeconds / 60)}:${details.lengthSeconds % 60} minutes`,
         uploader: details.author.name,
         views: details.viewCount.toLocaleString(),
-        uploadDate: details.uploadDate,
+        uploadDate: details.uploadDate
     };
 }
 
-app.get("/video", async (req, res) => {
-    const { url } = req.query;
-    if (!url || !ytdl.validateURL(url)) {
-        return res.status(400).json({ error: "URL गलत है!" });
-    }
+// 👉 YouTube ऑडियो को buffer में डाउनलोड करना
+async function downloadToBuffer(url, format) {
+    const chunks = [];
+    const stream = ytdl(url, { format, agent });
+    return new Promise((resolve, reject) => {
+        stream.on("data", chunk => chunks.push(chunk));
+        stream.on("end", () => resolve(Buffer.concat(chunks)));
+        stream.on("error", reject);
+    });
+}
 
+// 👉 Catbox पर ऑडियो अपलोड करना
+async function catbox(mediaBuffer, filename) {
     try {
-        const info = await getVideoInfo(url);
-        const videoFormat = await ytdl.getInfo(url).then(info => 
-            ytdl.chooseFormat(info.formats, { quality: "highestvideo" })
-        );
+        const form = new FormData();
+        form.append("reqtype", "fileupload");
+        form.append("fileToUpload", mediaBuffer, filename);
 
-        const filename = `video-${Date.now()}.mp4`;
-        const filepath = path.join(downloadDir, filename);
-        const writeStream = fs.createWriteStream(filepath);
-
-        ytdl(url, { format: videoFormat }).pipe(writeStream);
-
-        writeStream.on("finish", () => {
-            res.json({
-                info,
-                download: {
-                    quality: videoFormat.qualityLabel || "Unknown",
-                    size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Unknown",
-                    url: `${req.protocol}://${req.get('host')}/files/${filename}`,
-                },
-            });
+        const response = await axios.post("https://catbox.moe/user/api.php", form, {
+            headers: { ...form.getHeaders() },
         });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "वीडियो डाउनलोड करने में समस्या हुई!", details: error.message });
-    }
-});
 
+        return response.data;
+    } catch (error) {
+        throw new Error("Failed to upload to Catbox");
+    }
+}
+
+// 🎵 **Audio Download API**
 app.get("/audio", async (req, res) => {
-    const { url } = req.query;
-    if (!url || !ytdl.validateURL(url)) {
-        return res.status(400).json({ error: "URL गलत है!" });
-    }
-
     try {
-        const info = await getVideoInfo(url);
-        const audioFormat = await ytdl.getInfo(url).then(info => 
-            ytdl.chooseFormat(info.formats, { filter: "audioonly" })
-        );
+        const { url } = req.query;
+        if (!url || !ytdl.validateURL(url)) {
+            return res.status(400).json({ error: "Invalid URL" });
+        }
 
-        const filename = `audio-${Date.now()}.mp3`;
-        const filepath = path.join(downloadDir, filename);
-        const writeStream = fs.createWriteStream(filepath);
+        const infoFull = await ytdl.getInfo(url, { agent });
+        const formats = infoFull.formats.filter(f => f.hasAudio && !f.hasVideo);
 
-        ytdl(url, { format: audioFormat }).pipe(writeStream);
+        if (!formats.length) {
+            return res.status(500).json({ error: "No suitable audio format found" });
+        }
 
-        writeStream.on("finish", () => {
-            res.json({
-                info,
-                download: {
-                    quality: `${audioFormat.audioBitrate} kbps`,
-                    size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Unknown",
-                    url: `${req.protocol}://${req.get('host')}/files/${filename}`,
-                },
-            });
+        const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
+        const buffer = await downloadToBuffer(url, audioFormat);
+        const audioUrl = await catbox(buffer, "audio.mp3");
+
+        res.json({
+            info: await getVideoInfo(url),
+            result: {
+                quality: `${audioFormat.audioBitrate} kbps`,
+                size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Size not available",
+                url: audioUrl
+            },
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "ऑडियो डाउनलोड करने में समस्या हुई!", details: error.message });
+        res.status(500).json({ error: "Failed to process audio", details: error.message });
     }
 });
 
+// 🔍 **YouTube Search API**
+app.get("/search", async (req, res) => {
+    const query = req.query.q;
+    if (!query) {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+    }
+
+    try {
+        const result = await ytSearch(query);
+        const videos = result.videos.map(video => ({
+            title: video.title,
+            channel: video.author.name,
+            views: video.views.toLocaleString(),
+            duration: video.timestamp,
+            uploaded: video.ago,
+            url: video.url,
+            thumbnail: video.thumbnail
+        }));
+
+        res.json({ query, results: videos });
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch search results", details: error.message });
+    }
+});
+
+// 🚀 **Server Start**
 app.listen(PORT, () => {
-    console.log(`🚀 सर्वर चालू है: http://localhost:${PORT}`);
+    console.log(`Server चल रहा है: http://localhost:${PORT}`);
 });
