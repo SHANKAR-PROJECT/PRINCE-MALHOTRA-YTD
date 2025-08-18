@@ -17,7 +17,13 @@ app.use(cors());
 
 app.use("/files", express.static(tempDir));
 
-const agent = ytdl.createAgent(require("./cookie.json"));
+let agent;
+try {
+  agent = ytdl.createAgent(require("./cookie.json"));
+} catch (error) {
+  console.log("Cookie agent creation failed, using default");
+  agent = null;
+}
 
 function formatBytes(bytes) {
 if (bytes === 0) return "0 Bytes";
@@ -41,7 +47,8 @@ return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 
 async function getVideoInfo(url) {
-const info = await ytdl.getInfo(url, { agent });
+const infoOptions = agent ? { agent } : {};
+const info = await ytdl.getInfo(url, infoOptions);
 const details = info.videoDetails;
 return {
 title: details.title,
@@ -61,14 +68,29 @@ if (!url || !ytdl.validateURL(url)) {
 return res.status(400).json({ error: "URL tidak valid" });
 }
 try {
-const infoFull = await ytdl.getInfo(url, { agent });
+const infoOptions = agent ? { agent } : {};
+const infoFull = await ytdl.getInfo(url, infoOptions);
 let formats = infoFull.formats;
 if (!Array.isArray(formats)) {
 formats = Object.values(formats);
 }
-const videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", quality: "highest" });
+
+// Try different format selection strategies
+let videoFormat;
+try {
+  videoFormat = ytdl.chooseFormat(formats, { filter: "videoandaudio", quality: "highest" });
+} catch (formatError) {
+  console.log("Primary format selection failed, trying alternative");
+  try {
+    videoFormat = ytdl.chooseFormat(formats, { quality: "highest" });
+  } catch (secondError) {
+    videoFormat = formats.find(f => f.hasVideo && f.hasAudio) || formats[0];
+  }
+}
 const info = await getVideoInfo(url);
-const videoStream = ytdl(url, { format: videoFormat, agent });
+const streamOptions = { format: videoFormat };
+if (agent) streamOptions.agent = agent;
+const videoStream = ytdl(url, streamOptions);
 const filename = `video-${Date.now()}.mp4`
 const writeStream = fs.createWriteStream(tempDir + '/' + filename);
 videoStream.pipe(writeStream);
@@ -94,14 +116,25 @@ if (!url || !ytdl.validateURL(url)) {
 return res.status(400).json({ error: "URL tidak valid" });
 }
 try {
-const infoFull = await ytdl.getInfo(url, { agent });
+const infoOptions = agent ? { agent } : {};
+const infoFull = await ytdl.getInfo(url, infoOptions);
 let formats = infoFull.formats;
 if (!Array.isArray(formats)) {
 formats = Object.values(formats);
 }
-const audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
+
+let audioFormat;
+try {
+  audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
+} catch (formatError) {
+  console.log("Audio format selection failed, trying alternative");
+  audioFormat = formats.find(f => f.hasAudio && !f.hasVideo) || formats.find(f => f.hasAudio);
+}
+
 const info = await getVideoInfo(url);
-const audioStream = ytdl(url, { format: audioFormat, agent });
+const streamOptions = { format: audioFormat };
+if (agent) streamOptions.agent = agent;
+const audioStream = ytdl(url, streamOptions);
 const filename = `audio-${Date.now()}.mp3`
 const writeStream = fs.createWriteStream(tempDir + '/' + filename);
 audioStream.pipe(writeStream);
