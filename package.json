@@ -1,18 +1,18 @@
 {
   "name": "prince-ytdl",
-  "version": "1.1.0",
-  "description": "",
+  "version": "1.2.0",
+  "description": "YouTube Downloader API with cookies (yt-dlp)",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@distube/ytdl-core": "latest",
     "axios": "latest",
+    "cors": "latest",
     "express": "latest",
     "form-data": "4.0.0",
-    "cors": "latest",
-    "yt-search": "latest"
+    "yt-search": "latest",
+    "yt-dlp-exec": "latest"
   }
 }
