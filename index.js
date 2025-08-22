@@ -1,175 +1,63 @@
 const express = require("express");
-const ytSearch = require("yt-search");
-const ytdl = require("@distube/ytdl-core");
-const cors = require("cors");
 const fs = require("fs");
+const play = require("play-dl");
 const path = require("path");
 
 const app = express();
-const PORT = 7860;
+const PORT = process.env.PORT || 3000;
 
-const tempDir = path.join(__dirname, "public");
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir);
-}
-
-app.use(cors());
-app.use("/files", express.static(tempDir));
-
-let agent;
-try {
-  agent = ytdl.createAgent(require("./cookie.json")); // load cookies
-  console.log("✅ Cookie agent loaded");
-} catch (error) {
-  console.log("⚠️ Cookie agent creation failed, using default");
-  agent = null;
-}
-
-// Utility formatters
-function formatBytes(bytes) {
-  if (bytes === 0) return "0 Bytes";
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + " " + sizes[i];
-}
-
-function formatNumber(num) {
-  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-async function getVideoInfo(url) {
-  const infoOptions = agent ? { agent } : {};
-  const info = await ytdl.getInfo(url, infoOptions);
-  const details = info.videoDetails;
-  return {
-    title: details.title,
-    description: details.description || "No description",
-    thumbnail: details.thumbnails.pop().url,
-    duration: `${Math.floor(details.lengthSeconds / 60)}:${details.lengthSeconds % 60} minutes`,
-    uploader: details.author.name,
-    uploadDate: details.uploadDate,
-    views: formatNumber(details.viewCount),
-    likes: formatNumber(details.likes || 0),
-  };
-}
-
-// 🎥 Download Video
-app.get("/video", async (req, res) => {
-  const { url } = req.query;
-  if (!url || !ytdl.validateURL(url)) {
-    return res.status(400).json({ error: "Invalid YouTube URL" });
-  }
-
-  try {
-    const infoOptions = agent ? { agent } : {};
-    const infoFull = await ytdl.getInfo(url, infoOptions);
-    let formats = infoFull.formats;
-
-    let videoFormat;
-    try {
-      videoFormat = ytdl.chooseFormat(formats, { filter: "audioandvideo", quality: "highest" });
-    } catch {
-      videoFormat = formats.find(f => f.hasVideo && f.hasAudio) || formats[0];
-    }
-
-    const info = await getVideoInfo(url);
-    const filename = `video-${Date.now()}.mp4`;
-    const filePath = path.join(tempDir, filename);
-
-    const streamOptions = { format: videoFormat };
-    if (agent) streamOptions.agent = agent;
-
-    const videoStream = ytdl(url, streamOptions);
-    const writeStream = fs.createWriteStream(filePath);
-
-    videoStream.pipe(writeStream);
-    writeStream.on("finish", () => {
-      res.json({
-        info,
-        result: {
-          quality: videoFormat.qualityLabel || "Unknown",
-          size: videoFormat.contentLength ? formatBytes(parseInt(videoFormat.contentLength)) : "Unavailable",
-          url: `${req.protocol}://${req.get("host")}/files/${filename}`,
-        },
-      });
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to process video", details: error.message });
+// ✅ Load cookies (Netscape format ya plain cookie string)
+const cookie = fs.readFileSync("./cookie.txt", "utf8");
+play.setToken({
+  youtube: {
+    cookie: cookie
   }
 });
 
-// 🎵 Download Audio
-app.get("/audio", async (req, res) => {
-  const { url } = req.query;
-  if (!url || !ytdl.validateURL(url)) {
-    return res.status(400).json({ error: "Invalid YouTube URL" });
-  }
-
+// Download endpoint
+app.get("/download", async (req, res) => {
   try {
-    const infoOptions = agent ? { agent } : {};
-    const infoFull = await ytdl.getInfo(url, infoOptions);
-    let formats = infoFull.formats;
+    const url = req.query.url;
+    const type = req.query.type || "video"; // video | audio
 
-    let audioFormat;
-    try {
-      audioFormat = ytdl.chooseFormat(formats, { filter: "audioonly" });
-    } catch {
-      audioFormat = formats.find(f => f.hasAudio && !f.hasVideo) || formats.find(f => f.hasAudio);
+    if (!url) {
+      return res.status(400).json({ error: "Missing ?url parameter" });
     }
 
-    const info = await getVideoInfo(url);
-    const filename = `audio-${Date.now()}.mp3`;
-    const filePath = path.join(tempDir, filename);
+    // ---- Get video info ----
+    const info = await play.video_info(url);
+    const title = info.video_details.title.replace(/[^\w\s]/gi, "_");
 
-    const streamOptions = { format: audioFormat };
-    if (agent) streamOptions.agent = agent;
+    // ---- Stream ----
+    const streamData = await play.stream(url, {
+      quality: type === "audio" ? 128 : 720
+    });
 
-    const audioStream = ytdl(url, streamOptions);
+    const fileName = type === "audio" ? `${title}.mp3` : `${title}.mp4`;
+    const filePath = path.join(__dirname, fileName);
+
+    // ---- Save locally ----
     const writeStream = fs.createWriteStream(filePath);
+    streamData.stream.pipe(writeStream);
 
-    audioStream.pipe(writeStream);
     writeStream.on("finish", () => {
-      res.json({
-        info,
-        result: {
-          quality: `${audioFormat.audioBitrate || "??"} kbps`,
-          size: audioFormat.contentLength ? formatBytes(parseInt(audioFormat.contentLength)) : "Unavailable",
-          url: `${req.protocol}://${req.get("host")}/files/${filename}`,
-        },
+      console.log(`✅ File ready: ${fileName}`);
+      res.download(filePath, fileName, (err) => {
+        if (!err) fs.unlinkSync(filePath); // delete after sending
       });
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to process audio", details: error.message });
+
+  } catch (err) {
+    console.error("❌ Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 🔍 Search
-app.get("/search", async (req, res) => {
-  const query = req.query.q;
-  if (!query) {
-    return res.status(400).json({ error: "Query parameter 'q' is required" });
-  }
-
-  try {
-    const result = await ytSearch(query);
-    const videos = result.videos.map(video => ({
-      title: video.title,
-      channel: video.author.name,
-      views: formatNumber(video.views),
-      duration: video.timestamp,
-      uploaded: video.ago,
-      url: video.url,
-      thumbnail: video.thumbnail,
-    }));
-    res.json({ query, results: videos });
-  } catch (error) {
-    console.error("Error fetching YouTube search:", error);
-    res.status(500).json({ error: "Failed to fetch search results", details: error.message });
-  }
+// Root test
+app.get("/", (req, res) => {
+  res.send("✅ YouTube Downloader API is running!");
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
