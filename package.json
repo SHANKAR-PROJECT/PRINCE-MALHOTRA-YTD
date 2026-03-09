@@ -1,15 +1,18 @@
 {
-  "name": "yt-downloader-api",
-  "version": "1.0.0",
-  "description": "YouTube Downloader API using play-dl and Express",
+  "name": "prince-ytdl",
+  "version": "1.1.0",
+  "description": "",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "cors": "latest",
+    "@distube/ytdl-core": "latest",
+    "axios": "latest",
     "express": "latest",
-    "play-dl": "latest"
+    "form-data": "4.0.0",
+    "cors": "latest",
+    "yt-search": "latest"
   }
 }
